@@ -1,0 +1,6 @@
+#!/bin/sh
+
+for I in 102 104 106
+do
+	./test_proc 1 $I &
+done
