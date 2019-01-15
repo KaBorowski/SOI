@@ -1,0 +1,46 @@
+#!/bin/sh
+
+VFS_NAME='VFS'
+
+echo 'Creating VFS (space: 9000 B)'
+./main $VFS_NAME createVFS 9000
+sleep 2
+
+echo 'View disk information'
+./main $VFS_NAME viewInfo
+sleep 2
+
+echo 'View disk files'
+./main $VFS_NAME viewFiles
+sleep 2
+
+echo 'Adding small file "a"'
+./main $VFS_NAME copyIntoVD a a
+sleep 2
+
+echo 'View disk files'
+./main $VFS_NAME viewFiles
+sleep 2
+
+echo 'View disk information'
+./main $VFS_NAME viewInfo
+sleep 2
+
+echo 'Adding big file "b"'
+./main $VFS_NAME copyIntoVD b b
+sleep 2
+
+echo 'View disk files'
+./main $VFS_NAME viewFiles
+sleep 2
+
+echo 'View disk information'
+./main $VFS_NAME viewInfo
+sleep 2
+
+echo 'Removing VFS'
+./main $VFS_NAME removeVFS
+sleep 2
+
+
+

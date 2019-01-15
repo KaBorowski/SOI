@@ -25,9 +25,9 @@ struct vfs{
   struct inode * inodes;
 };
 
-//struct fat{
-//  int * fatTable;
-//};
+struct fat{
+  int * fatTable;
+};
 
 struct dentry{
   char name [MAX_NAME_SIZE];
@@ -95,7 +95,7 @@ int createVFS(char * name, unsigned int size){
   FILE * file;
   unsigned int blockAmount;
   struct superblock sb;
-  //struct fat fat;
+  struct fat fat;
   struct dentry * rd;
   struct vfs * vfs;
   char * zeros;
@@ -117,7 +117,7 @@ int createVFS(char * name, unsigned int size){
 
   sb.diskSize = size;
   sb.name = name;
-  sb.fatBlockSize = sizeof(fatTable);
+  sb.fatBlockSize = sizeof(fat);
   sb.rootdirBlockSize = sizeof(rd);
   sb.blockSize = BLOCK_SIZE;
 
@@ -125,12 +125,12 @@ int createVFS(char * name, unsigned int size){
     fatTable[i] = -2;
   }
 
-  //fatTable = fatTable;
+  fat.fatTable = fatTable;
 
   fseek(file, 0, 0);
   fwrite(&sb, sizeof(sb), 1, file);
   fseek(file, sizeof(sb), 0);
-  fwrite(fatTable, sizeof(int), blockAmount, file);
+  fwrite(fat.fatTable, sizeof(int), blockAmount, file);
 
   for(i=0; i<blockAmount; i++){
     strcpy(rd[i].name, "");
@@ -144,7 +144,6 @@ int createVFS(char * name, unsigned int size){
   vfs->blockAmount = blockAmount;
   vfs->rd = rd;
 
-  free(fatTable);
   closeVFS(vfs);
 
   return 0;
@@ -155,7 +154,7 @@ struct vfs * openVFS(char * name){
   unsigned int blockAmount;
   unsigned int size;
   struct superblock sb;
-  //struct fat fat;
+  struct fat fat;
   struct dentry * rd;
   struct vfs * vfs;
   int i;
@@ -174,7 +173,13 @@ struct vfs * openVFS(char * name){
   	fclose(file);
   	return NULL;
   }
-
+  // fseek(file, sizeof(sb), 0);
+  // result = fread(fat.fatTable, sizeof(int), 1, file);
+  //
+  // if(result == 0){
+  // fclose(file);
+  // return NULL;
+  // }
 
   blockAmount = (sb.diskSize - sizeof(sb))/(sizeof(struct dentry) + BLOCK_SIZE + sizeof(int));
   rd = malloc(blockAmount * sizeof(struct dentry));
@@ -215,7 +220,7 @@ int removeVFS(char * name){
 int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
   FILE * file;
   struct vfs * vfs;
-  //struct fat fat;
+  struct fat fat;
   unsigned int sourceFileSize;
   unsigned int requiredBlocks;
   unsigned int blockIndex;
@@ -225,7 +230,6 @@ int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
   unsigned int position; /* Pozycja w pliku na dane */
   int result;
   char data[BLOCK_SIZE];
-  int * fatTable;
 
   vfs = openVFS(name);
 
@@ -239,12 +243,10 @@ int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
   file = fopen(sourceFileName, "r+");
   if(!file) return 1;
 
-  fatTable = malloc(sizeof(int)*vfs->blockAmount);
-
   fseek(file, 0, 2);
   sourceFileSize = ftell(file);
   fseek(vfs->file, sizeof(struct superblock), 0);
-  result = fread(fatTable, sizeof(int), vfs->blockAmount, vfs->file);
+  result = fread(fat.fatTable, sizeof(int), vfs->blockAmount, vfs->file);
   if(result == 0){
     fclose(file);
     return 1;
@@ -290,10 +292,10 @@ int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
 
   	if(i < requiredBlocks - 1){
       //vfs->inodes[dentrys[i]].nextNode = dentrys[i+1];
-      fatTable[dentrys[i]] = dentrys[i+1];
+      fat.fatTable[dentrys[i]] = dentrys[i+1];
     }
 
-    if(i == requiredBlocks - 1) fatTable[dentrys[i]] = -1;
+    if(i == requiredBlocks - 1) fat.fatTable[dentrys[i]] = -1;
 
   	position = sizeof(struct superblock) + (sizeof(int) + sizeof(struct dentry)) * vfs->blockAmount + BLOCK_SIZE * dentrys[i];
 
@@ -303,9 +305,8 @@ int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
   }
 
   fseek(vfs->file, sizeof(struct superblock), 0);
-  fwrite(fatTable, sizeof(int), vfs->blockAmount, vfs->file);
+  fwrite(fat.fatTable, sizeof(int), vfs->blockAmount, vfs->file);
 
-  free(fatTable);
   free(dentrys);
   fclose(file);
   closeVFS(vfs);
@@ -316,13 +317,12 @@ int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
 int copyFromVD(char * name, char * sourceFileName, char * destFileName){
   FILE * file;
   struct vfs * vfs;
-  //struct fat fat;
+  struct fat fat;
   unsigned int position;
   unsigned int i;
   int tmp;
   int result;
   char data[BLOCK_SIZE];
-  int * fatTable;
 
   vfs = openVFS(name);
 
@@ -331,10 +331,8 @@ int copyFromVD(char * name, char * sourceFileName, char * destFileName){
   file = fopen(destFileName, "w+");
   if(!file) return 1;
 
-  fatTable = malloc(sizeof(int)*vfs->blockAmount);
-
   fseek(vfs->file, sizeof(struct superblock), 0);
-  result = fread(fatTable, sizeof(int), vfs->blockAmount, vfs->file);
+  result = fread(fat.fatTable, sizeof(int), vfs->blockAmount, vfs->file);
   if(result == 0) return 1;
 
   tmp = -1;
@@ -369,10 +367,9 @@ int copyFromVD(char * name, char * sourceFileName, char * destFileName){
   		return 1;
   	}
   	fwrite(data, 1, tempSize, file);
-    tmp = fatTable[tmp];
+    tmp = fat.fatTable[tmp];
   }
 
-  free(fatTable);
   fclose(file);
   closeVFS(vfs);
   return 0;
@@ -436,16 +433,13 @@ int viewInfo(char * name){
   unsigned int unusedNodes;
   unsigned int diskSize;
   struct vfs * vfs;
-  //struct fat fat;
-  int * fatTable;
+  struct fat fat;
 
   vfs = openVFS(name);
   if(!vfs) return 1;
 
-  fatTable = malloc(sizeof(int)*vfs->blockAmount);
-
   fseek(vfs->file, sizeof(struct superblock), 0);
-  fread(fatTable, sizeof(int), vfs->blockAmount, vfs->file);
+  fread(fat.fatTable, sizeof(int), vfs->blockAmount, vfs->file);
 
   fseek(vfs->file, 0, 2);
   diskSize = ftell(vfs->file);
@@ -475,7 +469,6 @@ int viewInfo(char * name){
   printf("Free blocks number: %d/%d\n", unusedNodes, vfs->blockAmount);
   printf("Free space: %d B\n\n", unusedNodes*BLOCK_SIZE);
 
-  free(fatTable);
   closeVFS(vfs);
   return 0;
 }

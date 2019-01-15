@@ -82,6 +82,35 @@ void initSem(){
 
 }
 
+void superProducer(char arg){
+  struct Buffer * buffer = getBuffers();
+  struct Semaphores * semaphores = getSemaphores();
+  char ret;
+
+  while(1){
+    printf("SuperProducent %c czeka na reader\n", arg);
+    sem_wait(&semaphores->reader);
+    printf("SuperProducent %c czeka na full\n", arg);
+    sem_wait(&semaphores->full);
+    printf("SuperProducent %c czeka na writer\n", arg);
+    sem_wait(&semaphores->writer);
+    sem_wait(&semaphores->mutex);
+    ret = buffer->buff[0];
+    for(int j=0; j<buffer->bufferSize; j++){
+      buffer->buff[j] = buffer->buff[j+1];
+    }
+    --buffer->bufferSize;
+    buffer->buff[buffer->bufferSize] = arg;
+    ++buffer->bufferSize;
+    printf("SuperProducent %c opuszcza SK\n", arg);
+    sem_post(&semaphores->mutex);
+    sem_post(&semaphores->full);
+    sem_post(&semaphores->writer);
+    sem_post(&semaphores->reader);
+    usleep(1100000);
+  }
+}
+
 void producer(char arg){
   struct Buffer * buffer = getBuffers();
   struct Semaphores * semaphores = getSemaphores();
@@ -148,12 +177,20 @@ void newProducent(char write){
   }
 }
 
+void newSuperProducent(char write){
+  int created = fork();
+  if(created == 0){
+    superProducer(write);
+  }
+}
+
 int main(int argc, char const *argv[]) {
   initSem();
   newConsumer('a', 2);
   newProducent('b');
   newConsumer('c', 3);
   newProducent('d');
+  newSuperProducent('s');
 
   while(1){}
 
