@@ -10,7 +10,7 @@
 
 struct superblock{
   unsigned int diskSize;
-  char * name;
+  char name[MAX_NAME_SIZE];
   unsigned int fatBlockSize;
   unsigned int rootdirBlockSize;
   unsigned int blockSize;
@@ -20,29 +20,15 @@ struct vfs{
   FILE * file;
   unsigned int blockAmount;
   struct dentry * rd;
-
-  unsigned int inodesAmount;
-  struct inode * inodes;
 };
-
-//struct fat{
-//  int * fatTable;
-//};
 
 struct dentry{
   char name [MAX_NAME_SIZE];
   unsigned int size;
-  //time_t create, modify;
+  time_t create;
+  time_t modify;
   int firstBlock;
   unsigned int valid;
-};
-
-struct inode{
-  char name [MAX_NAME_SIZE];
-  unsigned int size;
-  int isUsed;
-  int isBeginning;
-  int nextNode;
 };
 
 int createVFS(char * name, unsigned int size);
@@ -55,6 +41,7 @@ int removeFromVD(char * name, char *fileName);
 int viewFiles(char * name);
 int viewInfo(char * name);
 
+char * getDate(time_t time);
 
 
 int main(int argc, char * argv[]){
@@ -62,8 +49,8 @@ int main(int argc, char * argv[]){
   char * func;
   unsigned int error;
 
-  vfsName = argv[1];
-  func = argv[2];
+  vfsName = argv[2];
+  func = argv[1];
 
   if(strcmp(func, "createVFS") == 0)
 	error = createVFS(vfsName, atoi(argv[3]));
@@ -84,7 +71,7 @@ int main(int argc, char * argv[]){
 	printf("Incorrect name of function");
   }
 
-  if(error) printf("Error: Something went wrong try again");
+  if(error) printf("Error: Something went wrong try again\n");
 
 
 
@@ -95,7 +82,6 @@ int createVFS(char * name, unsigned int size){
   FILE * file;
   unsigned int blockAmount;
   struct superblock sb;
-  //struct fat fat;
   struct dentry * rd;
   struct vfs * vfs;
   char * zeros;
@@ -116,16 +102,14 @@ int createVFS(char * name, unsigned int size){
   fatTable = malloc(sizeof(int) * blockAmount);
 
   sb.diskSize = size;
-  sb.name = name;
-  sb.fatBlockSize = sizeof(fatTable);
-  sb.rootdirBlockSize = sizeof(rd);
+  strncpy(sb.name, name, MAX_NAME_SIZE);
+  sb.fatBlockSize = sizeof(int) * blockAmount;
+  sb.rootdirBlockSize = sizeof(struct dentry) * blockAmount;
   sb.blockSize = BLOCK_SIZE;
 
   for(i=0; i<blockAmount; i++){
     fatTable[i] = -2;
   }
-
-  //fatTable = fatTable;
 
   fseek(file, 0, 0);
   fwrite(&sb, sizeof(sb), 1, file);
@@ -155,7 +139,6 @@ struct vfs * openVFS(char * name){
   unsigned int blockAmount;
   unsigned int size;
   struct superblock sb;
-  //struct fat fat;
   struct dentry * rd;
   struct vfs * vfs;
   int i;
@@ -178,7 +161,7 @@ struct vfs * openVFS(char * name){
 
   blockAmount = (sb.diskSize - sizeof(sb))/(sizeof(struct dentry) + BLOCK_SIZE + sizeof(int));
   rd = malloc(blockAmount * sizeof(struct dentry));
-//MOZE BYC ZLE
+
   fseek(file, sizeof(sb)+sizeof(int)*blockAmount, 0);
   result = fread(rd, sizeof(struct dentry), blockAmount, file);
 
@@ -215,7 +198,7 @@ int removeVFS(char * name){
 int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
   FILE * file;
   struct vfs * vfs;
-  //struct fat fat;
+
   unsigned int sourceFileSize;
   unsigned int requiredBlocks;
   unsigned int blockIndex;
@@ -223,17 +206,30 @@ int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
   unsigned int tmp;
   unsigned int * dentrys;  /* Galezie w ktorych zapiszemy plik */
   unsigned int position; /* Pozycja w pliku na dane */
+  int modify;
   int result;
   char data[BLOCK_SIZE];
   int * fatTable;
+  time_t tmpCreate;
 
   vfs = openVFS(name);
 
   if (!vfs || strcmp(destFileName, "") == 0) return 1; /*zwroc blad jesli vfs lub nazwa puste*/
 
-  /*zwroc blad jesli istnieje plik o takiej nazwie*/
+  modify = -1;
+  /*modyfikacja istniejacego pliku*/
   for(i=0; i<vfs->blockAmount; i++){
-	   if(vfs->rd[i].valid == 1 && strcmp(vfs->rd[i].name, destFileName) == 0) return 1;
+	   if(vfs->rd[i].valid == 1 && strcmp(vfs->rd[i].name, destFileName) == 0) {
+       modify = i;
+       break;
+     }
+  }
+  if(modify != -1){
+    tmpCreate = vfs->rd[modify].create;
+    closeVFS(vfs);
+    removeFromVD(name, destFileName);
+    vfs = openVFS(name);
+    if (!vfs) return 1;
   }
 
   file = fopen(sourceFileName, "r+");
@@ -260,7 +256,8 @@ int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
 
   dentrys = malloc(requiredBlocks * sizeof(unsigned int));
 
-  /* Szukanie wolnych galezi */
+//POPRAWIC!!!!!!!!!
+  /* Szukanie wolnych blokow */
   blockIndex = 0;
   for(i=0; i<vfs->blockAmount; i++){
   	if(!vfs->rd[i].valid){
@@ -282,18 +279,24 @@ int copyIntoVD(char * name, char * sourceFileName, char * destFileName){
     size = fread(data, 1, sizeof(data), file);
     vfs->rd[dentrys[0]].size += size;
     vfs->rd[dentrys[i]].valid = 1;
+    vfs->rd[dentrys[i]].size = size;
 
   	if(i==0) {
     	strncpy(vfs->rd[dentrys[i]].name, destFileName, MAX_NAME_SIZE);
       vfs->rd[dentrys[i]].firstBlock = dentrys[i];
+      vfs->rd[dentrys[i]].modify = time(NULL);
+      if(modify == -1) vfs->rd[dentrys[i]].create = vfs->rd[dentrys[i]].modify;
+      else vfs->rd[dentrys[i]].create = tmpCreate;
+
     }
 
   	if(i < requiredBlocks - 1){
-      //vfs->inodes[dentrys[i]].nextNode = dentrys[i+1];
       fatTable[dentrys[i]] = dentrys[i+1];
     }
 
-    if(i == requiredBlocks - 1) fatTable[dentrys[i]] = -1;
+    if(i == requiredBlocks - 1) {
+      fatTable[dentrys[i]] = -1;
+    }
 
   	position = sizeof(struct superblock) + (sizeof(int) + sizeof(struct dentry)) * vfs->blockAmount + BLOCK_SIZE * dentrys[i];
 
@@ -353,9 +356,6 @@ int copyFromVD(char * name, char * sourceFileName, char * destFileName){
   unsigned int size = vfs->rd[tmp].size;
   unsigned int tempSize;
 
-// position = sizeof(struct superblock) + (sizeof(int) + sizeof(struct dentry)) * vfs->blockAmount + BLOCK_SIZE * tmp;
-//   printf("POZ: %d", position);
-
   while(tmp >= 0){
     tempSize = size;
     if(size > BLOCK_SIZE) {
@@ -383,32 +383,42 @@ int removeFromVD(char * name, char *fileName){
   unsigned int i;
   int tmp;
   int temp;
+  int result;
   char data[BLOCK_SIZE];
+  int * fatTable;
 
   vfs = openVFS(name);
-  if(!vfs) return 1;
+  if(!vfs || strcmp(fileName, "") == 0) return 1;
+
+  fatTable = malloc(sizeof(int) * vfs->blockAmount);
+  fseek(vfs->file, sizeof(struct superblock), 0);
+  result = fread(fatTable, sizeof(int), vfs->blockAmount, vfs->file);
+  if(result == 0) return 1;
 
   tmp = -1;
 
-  for(i=0; i<vfs->inodesAmount; i++){
-	if(vfs->inodes[i].isUsed && vfs->inodes[i].isBeginning && strcmp(vfs->inodes[i].name, fileName) == 0){
-		tmp = i;
-		break;
-	}
+  for(i=0; i<vfs->blockAmount; i++){
+  	if(vfs->rd[i].valid && strcmp(vfs->rd[i].name, fileName) == 0){
+  		tmp = i;
+  		break;
+  	}
   }
 
   if(tmp == -1) return 1;
 
-  while(tmp != -1){
-	temp = vfs->inodes[tmp].nextNode;
-	vfs->inodes[tmp].isUsed = 0;
-	vfs->inodes[tmp].isBeginning = 0;
-	vfs->inodes[tmp].size = 0;
-	vfs->inodes[tmp].nextNode = -1;
-	strcpy(vfs->inodes[tmp].name, "");
-    	tmp = temp;
+  while(tmp >=0){
+    temp = fatTable[tmp];
+  	vfs->rd[tmp].valid = 0;
+  	vfs->rd[tmp].firstBlock = 0;
+  	vfs->rd[tmp].size = 0;
+  	vfs->rd[tmp].create = 0;
+  	vfs->rd[tmp].modify = 0;
+	  strcpy(vfs->rd[tmp].name, "");
+    fatTable[tmp] = -2;
+    tmp = temp;
   }
 
+  free(fatTable);
   closeVFS(vfs);
   return 0;
 }
@@ -416,6 +426,8 @@ int removeFromVD(char * name, char *fileName){
 int viewFiles(char * name){
   unsigned int i;
   struct vfs * vfs;
+  char * created;
+  char * modified;
 
   vfs = openVFS(name);
   if(!vfs) return 1;
@@ -423,8 +435,10 @@ int viewFiles(char * name){
   printf("*********** List of files from \"%s\" ***********\n\n", name);
 
   for(i=0; i<vfs->blockAmount; i++){
-	if(vfs->rd[i].valid && vfs->rd[i].size != 0)
-		printf("Pos: %d. File: %s\n", i+1, vfs->rd[i].name);
+  	if(vfs->rd[i].valid && strcmp(vfs->rd[i].name, "") != 0){
+  		printf("%d. File: %s | Size:%d | Created: %s | Modified: ", i+1, vfs->rd[i].name, vfs->rd[i].size, getDate(vfs->rd[i].create));
+      printf("%s\n", getDate(vfs->rd[i].modify));
+    }
   }
 
   closeVFS(vfs);
@@ -433,11 +447,13 @@ int viewFiles(char * name){
 
 int viewInfo(char * name){
   unsigned int i;
-  unsigned int unusedNodes;
+  unsigned int unusedBlocks;
   unsigned int diskSize;
+  unsigned int adr;
   struct vfs * vfs;
-  //struct fat fat;
+  struct superblock sb;
   int * fatTable;
+  int result;
 
   vfs = openVFS(name);
   if(!vfs) return 1;
@@ -445,37 +461,66 @@ int viewInfo(char * name){
   fatTable = malloc(sizeof(int)*vfs->blockAmount);
 
   fseek(vfs->file, sizeof(struct superblock), 0);
-  fread(fatTable, sizeof(int), vfs->blockAmount, vfs->file);
+  result = fread(fatTable, sizeof(int), vfs->blockAmount, vfs->file);
+  if(!result){
+    free(fatTable);
+    closeVFS(vfs);
+    return 1;
+  }
 
-  fseek(vfs->file, 0, 2);
-  diskSize = ftell(vfs->file);
+  fseek(vfs->file, 0, 0);
+  result = fread(&sb, sizeof(sb), 1, vfs->file);
+  if(!result){
+    free(fatTable);
+    closeVFS(vfs);
+    return 1;
+  }
+
+  // fseek(vfs->file, 0, 2);
+  // diskSize = ftell(vfs->file);
 
   printf("************ Virtual Disk Info ************\n\n");
-  printf("Disk size: %d\n\n", diskSize);
-  printf("Number of data blocks: %d (%d B each)\n\n", vfs->blockAmount, BLOCK_SIZE);
-  printf("**** Files ****\n\n");
+  printf("Disk name: %s\n", sb.name);
+  printf("Disk size: %d\n", sb.diskSize);
+  printf("Number of data blocks: %d (%d B each)\n\n", vfs->blockAmount, sb.blockSize);
+  printf("**** Blocks ****\n\n");
 
-  unusedNodes = 0;
+  unusedBlocks = 0;
+  printf("------------------------------------------------------------------\n");
+  printf("Adr: #0 | Type: SB | Size: %ld\n", sizeof(sb));
+  printf("------------------------------------------------------------------\n");
+  printf("Adr: #%ld | Type: FAT | Size: %d\n", sizeof(sb), sb.fatBlockSize);
+    printf("------------------------------------------------------------------\n");
+  printf("Adr: #%ld | Type: RD | Size: %d\n", sb.fatBlockSize+sizeof(sb), sb.rootdirBlockSize);
+    printf("------------------------------------------------------------------\n");
+
+  adr = sb.fatBlockSize+sizeof(sb)+sb.rootdirBlockSize;
 
   for(i=0; i<vfs->blockAmount; i++){
 
-    	printf("ID: %d | ", i);
-    	printf("Usage: %s | ", vfs->rd[i].valid ? "Used" : "Unused");
-    	//printf("Beginning of file: %s | ", vfs->rd[i].isBeginning ? "Yes" : "No");
-    	printf("Name: %s | ", vfs->rd[i].name);
-    	printf("Size: %d | ", vfs->rd[i].size);
-    	// if(vfs->inodes[i].nextNode != -1)
-    	// 	printf("Next block: %d", vfs->inodes[i].nextNode);
+    	printf("Adr: #%d | ", adr+i*BLOCK_SIZE);
+    	printf("Type: DataBlock | ");
+      if(fatTable[i] != -2)
+    	 printf("Usage: Used | ");
+      else
+        printf("Usage: Unused | ");
+    	printf("Free Space: %d/%d\n", vfs->rd[i].size>sb.blockSize ? 0 : sb.blockSize-vfs->rd[i].size, sb.blockSize);
+      printf("------------------------------------------------------------------\n");
 
-    	if(!(vfs->rd[i].valid)) unusedNodes++;
-    	printf("\n");
+    	if(!(vfs->rd[i].valid)) unusedBlocks++;
   }
 
   printf("\n**** Disk usage ****\n\n");
-  printf("Free blocks number: %d/%d\n", unusedNodes, vfs->blockAmount);
-  printf("Free space: %d B\n\n", unusedNodes*BLOCK_SIZE);
+  printf("Free blocks number: %d/%d\n", unusedBlocks, vfs->blockAmount);
+  printf("Free space for new file: %d B\n\n", unusedBlocks*BLOCK_SIZE);
 
   free(fatTable);
   closeVFS(vfs);
   return 0;
+}
+
+char * getDate(time_t time){
+  struct tm * date;
+  date = localtime(&time);
+  return asctime(date);
 }
